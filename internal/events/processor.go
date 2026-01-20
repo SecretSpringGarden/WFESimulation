@@ -125,3 +125,233 @@ func (ep *EventProcessor) ProcessLearning(agents []*types.AIAgent, timeDelta int
 		}
 	}
 }
+
+
+// CatastrophicFailure represents a critical system failure event
+type CatastrophicFailure struct {
+	TimeStep int
+	Severity float64 // 0-1, where 1 is most severe
+}
+
+// GenerateCatastrophicFailure probabilistically generates failure events
+// Returns a failure event or nil if no failure occurs
+func (ep *EventProcessor) GenerateCatastrophicFailure(timeStep int) *CatastrophicFailure {
+	// Check if a failure occurs based on the configured rate
+	if ep.rng.Float64() < ep.catastrophicFailureRate {
+		// Generate a failure with random severity
+		severity := ep.rng.Float64()
+		return &CatastrophicFailure{
+			TimeStep: timeStep,
+			Severity: severity,
+		}
+	}
+	
+	return nil
+}
+
+
+// FailureOutcome represents the result of evaluating a catastrophic failure
+type FailureOutcome struct {
+	CanHandle            bool
+	ProductivityPenalty  float64 // 0-1, percentage reduction in productivity
+	RequiresHumanIntervention bool
+}
+
+// EvaluateFailureResponse assesses workforce capability to handle failures
+// Determines if productivity penalties should be applied
+func (ep *EventProcessor) EvaluateFailureResponse(
+	failure *CatastrophicFailure,
+	humans []*types.HumanWorker,
+	agents []*types.AIAgent,
+) FailureOutcome {
+	// Count senior+ humans (Senior and Executive)
+	seniorHumanCount := 0
+	for _, human := range humans {
+		if human.ExperienceLevel >= types.Senior {
+			seniorHumanCount++
+		}
+	}
+	
+	// Count senior+ AI agents
+	seniorAgentCount := 0
+	for _, agent := range agents {
+		if agent.ExperienceLevel >= types.Senior {
+			seniorAgentCount++
+		}
+	}
+	
+	// Calculate workforce capability score
+	// Senior humans are more valuable for handling failures
+	humanCapability := float64(seniorHumanCount) * 1.0
+	agentCapability := float64(seniorAgentCount) * 0.5 // AI agents are less capable
+	
+	totalCapability := humanCapability + agentCapability
+	
+	// Determine if workforce can handle the failure
+	// Require at least one senior human for any failure
+	if seniorHumanCount == 0 {
+		// No senior humans - cannot handle failure
+		return FailureOutcome{
+			CanHandle:                 false,
+			ProductivityPenalty:       failure.Severity * 0.5, // 50% of severity as penalty
+			RequiresHumanIntervention: true,
+		}
+	}
+	
+	// Check if capability is sufficient for the failure severity
+	requiredCapability := failure.Severity * 3.0 // Scale severity to required capability
+	
+	if totalCapability >= requiredCapability {
+		// Workforce can handle the failure
+		return FailureOutcome{
+			CanHandle:                 true,
+			ProductivityPenalty:       0.0,
+			RequiresHumanIntervention: false,
+		}
+	}
+	
+	// Workforce cannot fully handle the failure
+	// Apply productivity penalty proportional to the capability gap
+	capabilityGap := (requiredCapability - totalCapability) / requiredCapability
+	penalty := failure.Severity * capabilityGap * 0.3 // Up to 30% penalty
+	
+	return FailureOutcome{
+		CanHandle:                 false,
+		ProductivityPenalty:       penalty,
+		RequiresHumanIntervention: true,
+	}
+}
+
+
+// WorkforceChange represents a proposed change to the workforce
+type WorkforceChange struct {
+	HireAIAgents     int      // Number of AI agents to hire
+	ReleaseAIAgents  []string // IDs of AI agents to release
+	OrchestratorID   string   // ID of human to assign new agents to
+}
+
+// OptimizeWorkforce evaluates hiring/release opportunities
+// Prioritizes cost-effective decisions while respecting budget and orchestration constraints
+func (ep *EventProcessor) OptimizeWorkforce(
+	humans []*types.HumanWorker,
+	agents []*types.AIAgent,
+	availableBudget float64,
+	availableOrchestrationCapacity int,
+) WorkforceChange {
+	change := WorkforceChange{
+		HireAIAgents:    0,
+		ReleaseAIAgents: make([]string, 0),
+	}
+	
+	// If no orchestration capacity, we can't hire agents
+	if availableOrchestrationCapacity <= 0 {
+		return change
+	}
+	
+	// Calculate cost-effectiveness of hiring a new AI agent
+	// Start with University_Hire level agent
+	newAgentCost := types.AIAgentCosts[types.UniversityHire]
+	newAgentProductivity := types.AIAgentProductivity[types.UniversityHire]
+	
+	// Check if we can afford at least one agent
+	if availableBudget < newAgentCost {
+		return change
+	}
+	
+	// Calculate cost per productivity unit for new agent
+	newAgentCostPerProductivity := newAgentCost / newAgentProductivity
+	
+	// Find the most cost-effective human to compare against
+	// (This helps decide if we should hire AI instead of humans)
+	bestHumanCostPerProductivity := 0.0
+	for _, human := range humans {
+		effectiveProductivity := human.GetEffectiveProductivity(ep.timeZoneInefficiency)
+		if effectiveProductivity > 0 {
+			costPerProductivity := human.BaseCost / effectiveProductivity
+			if bestHumanCostPerProductivity == 0 || costPerProductivity < bestHumanCostPerProductivity {
+				bestHumanCostPerProductivity = costPerProductivity
+			}
+		}
+	}
+	
+	// Hire AI agents if they are more cost-effective than humans
+	// or if we have budget and capacity available
+	if newAgentCostPerProductivity < bestHumanCostPerProductivity || bestHumanCostPerProductivity == 0 {
+		// Calculate how many agents we can hire
+		maxAgentsByBudget := int(availableBudget / newAgentCost)
+		maxAgentsToHire := maxAgentsByBudget
+		if maxAgentsToHire > availableOrchestrationCapacity {
+			maxAgentsToHire = availableOrchestrationCapacity
+		}
+		
+		// Find the best orchestrator (human with most available capacity)
+		var bestOrchestrator *types.HumanWorker
+		maxCapacity := 0
+		for _, human := range humans {
+			capacity := human.GetOrchestrationCapacity()
+			if capacity > maxCapacity {
+				maxCapacity = capacity
+				bestOrchestrator = human
+			}
+		}
+		
+		if bestOrchestrator != nil && maxAgentsToHire > 0 {
+			// Hire agents up to the orchestrator's capacity
+			agentsToHire := maxAgentsToHire
+			if agentsToHire > bestOrchestrator.GetOrchestrationCapacity() {
+				agentsToHire = bestOrchestrator.GetOrchestrationCapacity()
+			}
+			
+			change.HireAIAgents = agentsToHire
+			change.OrchestratorID = bestOrchestrator.ID
+		}
+	}
+	
+	// Check if we should release any agents due to budget constraints
+	// This would happen if we're over budget (shouldn't normally occur)
+	// or if agents are not cost-effective
+	if availableBudget < 0 {
+		// We're over budget - need to release agents
+		// Release the least productive agents first
+		type agentScore struct {
+			id           string
+			productivity float64
+		}
+		
+		agentScores := make([]agentScore, 0, len(agents))
+		for _, agent := range agents {
+			agentScores = append(agentScores, agentScore{
+				id:           agent.ID,
+				productivity: agent.GetProductivity(),
+			})
+		}
+		
+		// Sort by productivity (ascending - least productive first)
+		for i := 0; i < len(agentScores)-1; i++ {
+			for j := i + 1; j < len(agentScores); j++ {
+				if agentScores[i].productivity > agentScores[j].productivity {
+					agentScores[i], agentScores[j] = agentScores[j], agentScores[i]
+				}
+			}
+		}
+		
+		// Release agents until we're back under budget
+		budgetDeficit := -availableBudget
+		for _, score := range agentScores {
+			if budgetDeficit <= 0 {
+				break
+			}
+			
+			// Find the agent and get its cost
+			for _, agent := range agents {
+				if agent.ID == score.id {
+					change.ReleaseAIAgents = append(change.ReleaseAIAgents, agent.ID)
+					budgetDeficit -= agent.GetCost()
+					break
+				}
+			}
+		}
+	}
+	
+	return change
+}
