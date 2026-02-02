@@ -70,3 +70,24 @@ type WorkforceComposition struct {
 	}
 	OrchestrationUtilization float64 // percentage of capacity used (0-100)
 }
+
+// SimulationState represents the state of the simulation at a specific time step
+type SimulationState struct {
+	TimeStep                  int
+	Workforce                 WorkforceComposition
+	TotalCost                 float64
+	AvailableBudget          float64
+	TotalProductivity        float64
+	RevenueOutput            float64
+	IsEquilibrium            bool
+	CatastrophicFailures     int
+}
+
+// SimulationResult represents the complete result of a simulation run
+type SimulationResult struct {
+	Config                    SimulationConfig
+	TimeSeries               []SimulationState
+	EquilibriumState         SimulationState
+	TimeToEquilibrium        int
+	TotalCatastrophicFailures int
+}
