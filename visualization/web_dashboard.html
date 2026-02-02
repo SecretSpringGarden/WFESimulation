@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workforce AI Transition Simulator - Web Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .file-input {
+            margin: 10px;
+            padding: 10px;
+            border: 2px dashed #3498db;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .file-input:hover {
+            background-color: #ecf0f1;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .chart-container {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 400px;
+        }
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #3498db;
+        }
+        .metric-label {
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        .error {
+            color: #e74c3c;
+            background: #fdf2f2;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .success {
+            color: #27ae60;
+            background: #f0f9f4;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Workforce AI Transition Simulator</h1>
+        <h2>Interactive Web Dashboard</h2>
+    </div>
+
+    <div class="upload-section">
+        <h3>Load Simulation Results</h3>
+        <div class="file-input">
+            <input type="file" id="fileInput" accept=".json" style="display: none;">
+            <label for="fileInput" style="cursor: pointer;">
+                📁 Click to select simulation results JSON file
+            </label>
+        </div>
+        <div id="fileStatus"></div>
+    </div>
+
+    <div id="metricsSection" style="display: none;">
+        <div class="metrics-grid" id="metricsGrid"></div>
+    </div>
+
+    <div id="dashboardSection" style="display: none;">
+        <div class="dashboard">
+            <div class="chart-container">
+                <div id="workforceChart"></div>
+            </div>
+            <div class="chart-container">
+                <div id="revenueChart"></div>
+            </div>
+            <div class="chart-container">
+                <div id="costChart"></div>
+            </div>
+            <div class="chart-container">
+                <div id="productivityChart"></div>
+            </div>
+            <div class="chart-container full-width">
+                <div id="overviewChart"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let simulationData = null;
+        let timeSeriesData = null;
+
+        document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    simulationData = JSON.parse(e.target.result);
+                    if (simulationData.TimeSeries) {
+                        timeSeriesData = simulationData.TimeSeries;
+                        displaySuccess('File loaded successfully!');
+                        createDashboard();
+                    } else {
+                        displayError('Invalid file format. Expected simulation results JSON with TimeSeries data.');
+                    }
+                } catch (error) {
+                    displayError('Error parsing JSON file: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function displayError(message) {
+            document.getElementById('fileStatus').innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        function displaySuccess(message) {
+            document.getElementById('fileStatus').innerHTML = `<div class="success">${message}</div>`;
+        }
+
+        function createDashboard() {
+            createMetrics();
+            createWorkforceChart();
+            createRevenueChart();
+            createCostChart();
+            createProductivityChart();
+            createOverviewChart();
+            
+            document.getElementById('metricsSection').style.display = 'block';
+            document.getElementById('dashboardSection').style.display = 'block';
+        }
+
+        function createMetrics() {
+            const metricsGrid = document.getElementById('metricsGrid');
+            const metrics = [];
+
+            if (simulationData.TimeToEquilibrium !== undefined) {
+                metrics.push({
+                    label: 'Time to Equilibrium',
+                    value: simulationData.TimeToEquilibrium + ' steps'
+                });
+            }
+
+            if (simulationData.TotalCatastrophicFailures !== undefined) {
+                metrics.push({
+                    label: 'Catastrophic Failures',
+                    value: simulationData.TotalCatastrophicFailures
+                });
+            }
+
+            if (simulationData.EquilibriumState) {
+                const eq = simulationData.EquilibriumState;
+                if (eq.RevenueOutput !== undefined) {
+                    metrics.push({
+                        label: 'Final Revenue',
+                        value: '$' + eq.RevenueOutput.toLocaleString()
+                    });
+                }
+                if (eq.TotalProductivity !== undefined) {
+                    metrics.push({
+                        label: 'Final Productivity',
+                        value: eq.TotalProductivity.toFixed(2)
+                    });
+                }
+                if (eq.Workforce && eq.Workforce.Humans && eq.Workforce.AIAgents) {
+                    const humans = eq.Workforce.Humans.Total;
+                    const ai = eq.Workforce.AIAgents.Total;
+                    metrics.push({
+                        label: 'Final Humans',
+                        value: humans
+                    });
+                    metrics.push({
+                        label: 'Final AI Agents',
+                        value: ai
+                    });
+                    if (humans > 0) {
+                        metrics.push({
+                            label: 'AI:Human Ratio',
+                            value: (ai / humans).toFixed(2)
+                        });
+                    }
+                }
+            }
+
+            metricsGrid.innerHTML = metrics.map(metric => `
+                <div class="metric-card">
+                    <div class="metric-value">${metric.value}</div>
+                    <div class="metric-label">${metric.label}</div>
+                </div>
+            `).join('');
+        }
+
+        function createWorkforceChart() {
+            const timeSteps = timeSeriesData.map(d => d.TimeStep);
+            const humans = timeSeriesData.map(d => d.Workforce?.Humans?.Total || 0);
+            const aiAgents = timeSeriesData.map(d => d.Workforce?.AIAgents?.Total || 0);
+
+            const trace1 = {
+                x: timeSteps,
+                y: humans,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Human Workers',
+                line: { color: '#3498db', width: 3 },
+                marker: { size: 6 }
+            };
+
+            const trace2 = {
+                x: timeSteps,
+                y: aiAgents,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'AI Agents',
+                line: { color: '#e74c3c', width: 3 },
+                marker: { size: 6 }
+            };
+
+            const layout = {
+                title: 'Workforce Composition Over Time',
+                xaxis: { title: 'Time Step' },
+                yaxis: { title: 'Number of Workers' },
+                hovermode: 'x unified'
+            };
+
+            Plotly.newPlot('workforceChart', [trace1, trace2], layout, {responsive: true});
+        }
+
+        function createRevenueChart() {
+            const timeSteps = timeSeriesData.map(d => d.TimeStep);
+            const revenue = timeSeriesData.map(d => d.RevenueOutput || 0);
+
+            const trace = {
+                x: timeSteps,
+                y: revenue,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Revenue Output',
+                line: { color: '#27ae60', width: 3 },
+                marker: { size: 6 },
+                fill: 'tonexty'
+            };
+
+            const layout = {
+                title: 'Revenue Output Over Time',
+                xaxis: { title: 'Time Step' },
+                yaxis: { title: 'Revenue ($)' },
+                hovermode: 'x unified'
+            };
+
+            Plotly.newPlot('revenueChart', [trace], layout, {responsive: true});
+        }
+
+        function createCostChart() {
+            const timeSteps = timeSeriesData.map(d => d.TimeStep);
+            const totalCost = timeSeriesData.map(d => d.TotalCost || 0);
+            const availableBudget = timeSeriesData.map(d => d.AvailableBudget || 0);
+
+            const trace1 = {
+                x: timeSteps,
+                y: totalCost,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Total Cost',
+                line: { color: '#f39c12', width: 3 },
+                marker: { size: 6 }
+            };
+
+            const trace2 = {
+                x: timeSteps,
+                y: availableBudget,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Available Budget',
+                line: { color: '#9b59b6', width: 3, dash: 'dash' },
+                marker: { size: 6 }
+            };
+
+            const layout = {
+                title: 'Cost and Budget Analysis',
+                xaxis: { title: 'Time Step' },
+                yaxis: { title: 'Amount ($)' },
+                hovermode: 'x unified'
+            };
+
+            Plotly.newPlot('costChart', [trace1, trace2], layout, {responsive: true});
+        }
+
+        function createProductivityChart() {
+            const timeSteps = timeSeriesData.map(d => d.TimeStep);
+            const productivity = timeSeriesData.map(d => d.TotalProductivity || 0);
+
+            const trace = {
+                x: timeSteps,
+                y: productivity,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Total Productivity',
+                line: { color: '#1abc9c', width: 3 },
+                marker: { size: 6 }
+            };
+
+            const layout = {
+                title: 'Total Productivity Over Time',
+                xaxis: { title: 'Time Step' },
+                yaxis: { title: 'Productivity Units' },
+                hovermode: 'x unified'
+            };
+
+            Plotly.newPlot('productivityChart', [trace], layout, {responsive: true});
+        }
+
+        function createOverviewChart() {
+            const timeSteps = timeSeriesData.map(d => d.TimeStep);
+            const humans = timeSeriesData.map(d => d.Workforce?.Humans?.Total || 0);
+            const aiAgents = timeSeriesData.map(d => d.Workforce?.AIAgents?.Total || 0);
+            const revenue = timeSeriesData.map(d => d.RevenueOutput || 0);
+            const productivity = timeSeriesData.map(d => d.TotalProductivity || 0);
+
+            // Normalize revenue and productivity for display
+            const maxRevenue = Math.max(...revenue);
+            const maxProductivity = Math.max(...productivity);
+            const normalizedRevenue = revenue.map(r => (r / maxRevenue) * Math.max(...humans, ...aiAgents));
+            const normalizedProductivity = productivity.map(p => (p / maxProductivity) * Math.max(...humans, ...aiAgents));
+
+            const trace1 = {
+                x: timeSteps,
+                y: humans,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Human Workers',
+                line: { color: '#3498db', width: 2 },
+                stackgroup: 'workforce'
+            };
+
+            const trace2 = {
+                x: timeSteps,
+                y: aiAgents,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'AI Agents',
+                line: { color: '#e74c3c', width: 2 },
+                stackgroup: 'workforce'
+            };
+
+            const trace3 = {
+                x: timeSteps,
+                y: normalizedRevenue,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Revenue (normalized)',
+                line: { color: '#27ae60', width: 2, dash: 'dot' },
+                yaxis: 'y2'
+            };
+
+            const trace4 = {
+                x: timeSteps,
+                y: normalizedProductivity,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Productivity (normalized)',
+                line: { color: '#f39c12', width: 2, dash: 'dashdot' },
+                yaxis: 'y2'
+            };
+
+            const layout = {
+                title: 'Simulation Overview - All Metrics',
+                xaxis: { title: 'Time Step' },
+                yaxis: { 
+                    title: 'Workforce Count',
+                    side: 'left'
+                },
+                yaxis2: {
+                    title: 'Normalized Revenue/Productivity',
+                    side: 'right',
+                    overlaying: 'y'
+                },
+                hovermode: 'x unified',
+                height: 500
+            };
+
+            Plotly.newPlot('overviewChart', [trace1, trace2, trace3, trace4], layout, {responsive: true});
+        }
+    </script>
+</body>
+</html>

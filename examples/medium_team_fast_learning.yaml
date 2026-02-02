@@ -1,0 +1,21 @@
+InitialHumans: 50
+ExperienceDistribution:
+  UniversityHire: 35.0
+  MidLevel: 35.0
+  Senior: 25.0
+  Executive: 5.0
+CostCategoryDistribution:
+  HighCostUS: 75.0
+  LowCostNonUS: 25.0
+FixedBudget: 8500000.0
+RevenueScenario: 1  # ExplosiveGrowth
+AILearningSpeeds:
+  UniversityToMid: 6
+  MidToSenior: 12
+  SeniorToExecutive: 20
+AttritionConfig:
+  Type: 0  # NaturalAttrition
+  NaturalRate: 12.0
+  ForcedAcceleration: 1.0
+CatastrophicFailureRate: 0.018
+TimeZoneInefficiency: 0.15
